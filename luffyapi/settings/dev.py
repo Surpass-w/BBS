@@ -184,7 +184,7 @@ LOGGING = {
 
 # CORS_ORIGIN_ALLOW_ALL = True
 CORS_ORIGIN_WHITELIST = (
-    'http://127.0.0.1:8080',
+    'http://127.0.0.1:8081',
 )
 
 CORS_ALLOW_METHODS = (
@@ -211,7 +211,7 @@ CORS_ALLOW_HEADERS = (
 import datetime
 
 JWT_AUTH = {
-    'JWT_EXPIRATION_DELTA': datetime.timedelta(minutes=5),  # 过期时间，手动配置
+    'JWT_EXPIRATION_DELTA': datetime.timedelta(days=7),  # 设置过期时间为7天
 }
 
 from .const import *

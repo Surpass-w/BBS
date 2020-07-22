@@ -44,13 +44,17 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(max_length=32)
+    username = serializers.CharField()
 
     class Meta:
         model = User
-        fields = ['username', 'password']
+        fields = ['id', 'username', 'password']
+        extra_kwargs = {
+            'id': {'read_only': True},
+            'password': {'write_only': True}
+        }
 
-    def validate(self, attrs):
+    def _get_user(self, attrs):
         username = attrs.get('username', None)
         password = attrs.get('password', None)
         if re.match(r'^1[3-9][0-9]{9}$', username):
@@ -63,9 +67,24 @@ class LoginSerializer(serializers.ModelSerializer):
             raise ValidationError('用户不存在')
         if not user.check_password(password):
             raise ValidationError('密码错误')
-        payload = jwt_payload_handler(user)  # 放入user对象得到payload对象
-        jwt_value = jwt_encode_handler(payload)  # 放入payload对象得到token
-        login_info = {'username': user.username, 'login_time': time.strftime('%Y-%m-%d %H:%M:%S'), 'token': jwt_value}
+        return user
+
+    def _get_token(self, user):
+        """
+        通过user对象获取到荷载payload
+        通过payload获取到token
+        """
+        payload = jwt_payload_handler(user)
+        jwt_value = jwt_encode_handler(payload)
+        return jwt_value
+
+    def validate(self, attrs):
+        user = self._get_user(attrs)
+        login_info = {
+            'username': user.username,
+            'login_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'token': self._get_token(user)
+        }
         for attr, value in login_info.items():
             self.context[attr] = value
         return attrs

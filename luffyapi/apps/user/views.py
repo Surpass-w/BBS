@@ -2,14 +2,18 @@ from django.shortcuts import render
 
 from rest_framework.viewsets import ViewSet, GenericViewSet
 from rest_framework.decorators import action
-from .serializer import RegisterSerializer, LoginSerializer
+from .serializer import RegisterSerializer, LoginSerializer, CodeLoginSerializer
 from luffyapi.utils.apiresponse import APIResponse
 
-from luffyapi.libs.tx_sms import send_message, get_random_code
+from luffyapi.libs.tx_sms import send_message
+from luffyapi.libs.send_email import send_email
+from utils.randomcode import get_random_code
+from .throttling import AccountThrottling
+from django.core.cache import cache
 
 from .models import User
-
 import re
+from django.conf import settings
 
 
 # Create your views here.
@@ -22,9 +26,11 @@ class RegisterView(GenericViewSet):
 
     def register(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        return APIResponse(msg='用户注册成功', data=serializer.data)
+        if serializer.is_valid():
+            self.perform_create(serializer)
+            return APIResponse(msg='用户注册成功', data=serializer.data)
+        else:
+            return APIResponse(msg='用户注册失败', error=serializer.errors)
 
 
 class LoginView(ViewSet):
@@ -36,52 +42,94 @@ class LoginView(ViewSet):
     def login(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            print(serializer.context, type(serializer.context))
             return APIResponse(msg='用户登录成功', data=serializer.context)
         else:
-            return APIResponse(code=101, msg='用户登录失败', data={'result': '数据校验未通过'})
+            return APIResponse(code=101, msg='用户登录失败', data={'result': serializer.errors})
 
 
-class CheckPhone(object):
-    def phone_is_valid(self, telephone):
-        if not re.match(r'^1[3-9][0-9]{9}$', telephone):
-            return False, '手机号格式不合法'
-        if not User.objects.filter(telephone=telephone):
-            return False, '手机号未注册'
+class CodeLoginView(ViewSet):
+
+    @action(methods=['POST', ], detail=False)
+    def code_login(self, request, *args, **kwargs):
+        serializer = CodeLoginSerializer(data=request.data)
+        if serializer.is_valid():
+            return APIResponse(msg='用户登录成功', data=serializer.context)
+        else:
+            return APIResponse(code=101, msg='用户登录失败', data={'result': serializer.errors})
+
+
+class CheckAccount(object):
+    reg_phone = r'^1[3-9][0-9]{9}$'
+    reg_email = r'^[A-Za-z0-9\u4e00-\u9fa5]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$'
+
+    def account_is_valid(self, account):
+        if not re.match(self.reg_phone, account) and not re.match(self.reg_email, account):
+            return (False, '账号格式不合法')
+        elif re.match(self.reg_phone, account):
+            user = User.objects.filter(telephone=account, is_delete=False).first()
+        else:
+            user = User.objects.filter(email=account, is_delete=False).first()
+        if not user:
+            return (False, '账号未注册')
         return True
 
 
-class CheckPhoneView(ViewSet, CheckPhone):
-    """
-    后端校验手机格式是否合法，主要针对绕过浏览器给后端发送请求
-    """
+class CheckAccountView(ViewSet, CheckAccount):
 
-    @action(methods=['GET'], detail=False)
-    def check_phone(self, request, *args, **kwargs):
-        telephone = request.query_params.get('telephone')
-        ret = self.phone_is_valid(telephone)
+    @action(methods=['GET', ], detail=False)
+    def check_account(self, request, *args, **kwargs):
+        account = request.query_params.get('account')
+        ret = self.account_is_valid(account)
         if isinstance(ret, tuple):
             _, msg = ret
             return APIResponse(code=101, msg=msg)
-        return APIResponse(msg='手机号检测成功')
+        return APIResponse(msg='账号检测成功')
 
 
-class SendMessageView(ViewSet, CheckPhone):
+class SendCodeView(ViewSet, CheckAccount):
+    reg_phone = r'^1[3-9][0-9]{9}$'
+    reg_email = r'^[A-Za-z0-9\u4e00-\u9fa5]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$'
+    random_code = get_random_code()
+    throttle_classes = [AccountThrottling, ]
 
-    def phone_is_valid(self, telephone):
-        if not re.match(r'^1[3-9][0-9]{9}$', telephone):
-            return False, '手机号格式不合法'
-        return True
+    def account_is_valid(self, account):
+        if not re.match(self.reg_phone, account) and not re.match(self.reg_email, account):
+            return False, '账号格式不合法'
+        elif re.match(self.reg_phone, account):
+            return 'phone'
+        else:
+            return 'email'
+
+    @property
+    def email_configure(self):
+        """
+        send_email(link, random_code, subject, text_content, html_content, recv_email)
+        """
+        return {
+            'link': '<a href="http://www.mzitu.com" style="text-decoration: none">详情链接</a>',
+            'random_code': '<a href="#" style="text-decoration: none">%s</a>' % self.random_code,
+            'subject': 'Django REST FRAMEWORK官方注册邮件',
+            'text_content': '这是一封非常重要的邮件',
+            'html_content': """
+                <p>尊敬的用户:</p><br>
+                <p>&nbsp;&nbsp;&nbsp;&nbsp;您好，欢迎注册Django DRF，您的验证码为:%(code)s,3分钟有效。更多详情请点击链接:%(link)s!<p>
+            """,
+        }
 
     @action(methods=['GET'], detail=False)
-    def send_msg(self, request, *args, **kwargs):
-        telephone = request.query_params.get('telephone')
-        ret = self.phone_is_valid(telephone)
+    def send_code(self, request, *args, **kwargs):
+        account = request.query_params.get('account')
+        ret = self.account_is_valid(account)
         if isinstance(ret, tuple):
             _, msg = ret
             return APIResponse(code=101, msg=msg)
-        random_code = get_random_code()
-        result = send_message(telephone, random_code)
-        if not result:
-            return APIResponse(code=101, msg='短信验证失败')
-        return APIResponse(msg='短信验证成功')
+        if ret == 'phone':
+            result = send_message(account, self.random_code)
+            if not result:
+                return APIResponse(code=101, msg='验证码发送失败')
+        else:
+            email_configure = self.email_configure
+            email_configure['recv_email'] = account
+            send_email(**email_configure)
+        cache.set(settings.ACCOUNT_CACHE_KEY % {'key': account}, self.random_code, 180)
+        return APIResponse(msg='验证码发送成功')

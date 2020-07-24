@@ -1,1 +1,1 @@
-from .send_msg import get_random_code, send_message
+from .send_msg import send_message

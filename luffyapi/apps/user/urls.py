@@ -1,11 +1,12 @@
-from django.urls import path, include
-from .views import RegisterView, LoginView, CheckPhoneView, SendMessageView
+from django.urls import path
+from .views import RegisterView, LoginView, CheckAccountView, SendCodeView, CodeLoginView
 from rest_framework.routers import SimpleRouter
 
 router = SimpleRouter()
 router.register('', LoginView, 'login')
-router.register('', CheckPhoneView, 'check_phone')
-router.register('', SendMessageView, 'send_msg')
+router.register('', CheckAccountView, 'check_account')
+router.register('', SendCodeView, 'send_code')
+router.register('', CodeLoginView, 'code_login')
 
 urlpatterns = [
     # 用户注册接口

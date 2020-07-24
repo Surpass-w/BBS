@@ -131,6 +131,9 @@ AUTH_USER_MODEL = 'user.user'  # 应用名+表名
 
 REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'luffyapi.utils.exceptions.common_exception_handler',
+    # 'DEFAULT_THROTTLE_RATES':{
+    #     'email':'1/m',  # 一分钟一次
+    # }
 }
 
 LOGGING = {
@@ -184,7 +187,7 @@ LOGGING = {
 
 # CORS_ORIGIN_ALLOW_ALL = True
 CORS_ORIGIN_WHITELIST = (
-    'http://127.0.0.1:8081',
+    'http://127.0.0.1:8080',
 )
 
 CORS_ALLOW_METHODS = (
@@ -215,3 +218,7 @@ JWT_AUTH = {
 }
 
 from .const import *
+
+from luffyapi.libs.send_email.settings import *
+
+

@@ -21,44 +21,57 @@ def get_token(user):
 
 class RegisterSerializer(serializers.ModelSerializer):
     code = serializers.CharField(max_length=6, min_length=6, write_only=True)
+    account = serializers.CharField(write_only=True)
 
     class Meta:
         model = User
-        fields = ['telephone', 'password', 'code', 'username']
+        fields = ['account', 'password', 'code', 'username']
         extra_kwargs = {
             'password': {'max_length': 18, 'min_length': 8},
             'username': {'read_only': True},
-            'telephone': {'write_only': True},
         }
 
-    def _check_telephone(self, telephone):
-        if not re.match(r'^1[3-9][0-9]{9}$', telephone):
-            return False, '手机号格式不合法'
-        user = User.objects.filter(telephone=telephone, is_delete=False).first()
+    def _check_account(self, account):
+        is_email = False
+        reg_phone = r'^1[3-9][0-9]{9}$'
+        reg_email = r'^[A-Za-z0-9\u4e00-\u9fa5]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$'
+        if not re.match(reg_phone, account) and not re.match(reg_email, account):
+            return False, '账号格式不合法'
+        elif re.match(reg_phone, account):
+            user = User.objects.filter(telephone=account, is_delete=False).first()
+        else:
+            user = User.objects.filter(email=account, is_delete=False).first()
+            is_email = True
         if user:
             return False, '用户已存在，请直接登录'
-        cache_key = settings.ACCOUNT_CACHE_KEY % {'key': telephone}
-        return cache.get(cache_key, None)
+        cache_key = settings.ACCOUNT_CACHE_KEY % {'key': account}
+        return {'cache_code': cache.get(cache_key, None), 'is_email': is_email}
 
     def validate(self, attrs):
         """
         前端校验后，后端还需要再校验一下，存在绕过浏览器注册的场景，因此在这里需要再校验一下
         """
-        telephone = attrs.get('telephone', None)
+        account = attrs.get('account', None)
         code = attrs.get('code', None)
-        ret = self._check_telephone(telephone)
-        if not ret:
-            raise ValidationError('验证码已过期')
+        ret = self._check_account(account)
         if isinstance(ret, tuple):
             _, msg = ret
             raise ValidationError(msg)
-        if code == ret:
-            attrs['username'] = telephone
-            return attrs
-        raise ValidationError('验证码错误')
+        else:
+            cache_code = ret.get('cache_code', None)
+            if not cache_code:
+                raise ValidationError('验证码已过期')
+        if not code == cache_code:
+            raise ValidationError('验证码错误')
+        attrs['username'] = account
+        attr = 'email' if ret.get('is_email') else 'telephone'
+        attrs[attr] = account
+        return attrs
 
     def create(self, validated_data):
+        print(validated_data)
         validated_data.pop('code')
+        validated_data.pop('account')
         instance = User.objects.create_user(**validated_data)
         return instance
 
